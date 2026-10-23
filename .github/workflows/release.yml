@@ -1,0 +1,83 @@
+# Builds the PCD Community Edition release artifact and its charts from one ref
+# of platform9/fawkes and pushes them to ghcr.io/dmiller-pf9. Nothing is built
+# from this repository: the workflow checks out the fawkes ref and runs its
+# own Makefile targets, so the artifact is exactly what that ref contains.
+#
+# Pushes: ghcr.io/dmiller-pf9/pcd-release:<releases/ce/VERSION> and every chart
+# as ghcr.io/dmiller-pf9/charts/<name>:<version>. The packages must be public
+# (see README); publish fails if one is not.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The platform9/fawkes ref to build (branch, tag or SHA)
+        required: true
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CE_REGISTRY: oci://ghcr.io/dmiller-pf9
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out platform9/fawkes@${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          repository: platform9/fawkes
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.FAWKES_REPO_READ }}
+          path: fawkes
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: fawkes/go.mod
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.0.0
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+        with:
+          version: 1.2.3
+
+      - name: Fetch the inputs, assemble and test
+        working-directory: fawkes
+        run: make test-ce
+
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+          echo "$GHCR_TOKEN" | oras login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Publish
+        working-directory: fawkes
+        run: make ce-publish
+
+      - name: Summary
+        working-directory: fawkes
+        run: |
+          version=$(tr -d '\n' < releases/ce/VERSION)
+          digest=$(oras resolve "ghcr.io/dmiller-pf9/pcd-release:$version")
+          {
+            echo "## PCD Community Edition from platform9/fawkes@${{ inputs.ref }}"
+            echo
+            echo "- artifact: \`ghcr.io/dmiller-pf9/pcd-release:$version\` (\`$digest\`)"
+            echo "- charts, under \`ghcr.io/dmiller-pf9/charts\`:"
+            for tgz in releases/ce/out/charts/*.tgz; do
+              echo "  - \`$(basename "$tgz" .tgz)\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
