@@ -1,0 +1,90 @@
+# Builds the fawkes operator image and the Job image from one ref of
+# platform9/fawkes and pushes them to ghcr.io/dmiller-pf9. Nothing is built
+# from this repository: the workflow checks out the fawkes ref and runs its
+# own Makefile targets, so the images are exactly what that ref contains.
+#
+# Tags: the ref's commit SHA always; `latest` when the ref is `main`; the
+# tag's own name when the ref is a tag.
+name: images
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The platform9/fawkes ref to build (branch, tag or SHA)
+        required: true
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/dmiller-pf9
+  OPERATOR_IMAGE: fawkes
+  JOB_IMAGE: fawkes-job
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out platform9/fawkes@${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          repository: platform9/fawkes
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.FAWKES_REPO_READ }}
+          path: fawkes
+
+      - name: Resolve the tags
+        id: tags
+        working-directory: fawkes
+        run: |
+          sha=$(git rev-parse HEAD)
+          tags="$sha"
+          if [ "${{ inputs.ref }}" = main ]; then
+            tags="$tags latest"
+          elif git tag --points-at HEAD | grep -qx -- "${{ inputs.ref }}"; then
+            tags="$tags ${{ inputs.ref }}"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "building $sha, tags: $tags"
+
+      - name: Build the operator image
+        working-directory: fawkes
+        run: make docker-build IMG="$REGISTRY/$OPERATOR_IMAGE:${{ steps.tags.outputs.sha }}"
+
+      - name: Build and check the Job image
+        working-directory: fawkes
+        run: make test-job-image JOB_IMG="$REGISTRY/$JOB_IMAGE:${{ steps.tags.outputs.sha }}"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: |
+          sha=${{ steps.tags.outputs.sha }}
+          for image in "$OPERATOR_IMAGE" "$JOB_IMAGE"; do
+            for tag in ${{ steps.tags.outputs.tags }}; do
+              [ "$tag" = "$sha" ] || docker tag "$REGISTRY/$image:$sha" "$REGISTRY/$image:$tag"
+              docker push "$REGISTRY/$image:$tag"
+            done
+          done
+
+      - name: Summary
+        run: |
+          {
+            echo "## Images from platform9/fawkes@${{ inputs.ref }} (${{ steps.tags.outputs.sha }})"
+            echo
+            for image in "$OPERATOR_IMAGE" "$JOB_IMAGE"; do
+              for tag in ${{ steps.tags.outputs.tags }}; do
+                echo "- \`$REGISTRY/$image:$tag\`"
+              done
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
