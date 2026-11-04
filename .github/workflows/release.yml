@@ -1,11 +1,13 @@
-# Builds the PCD Community Edition release artifact and its charts from one ref
-# of platform9/fawkes and pushes them to ghcr.io/dmiller-pf9. Nothing is built
+# Builds one PCD release artifact line (the `pcd` line, which installs
+# Community Edition and on-prem PCD, or the `saas-oci` line) from one ref of
+# platform9/fawkes and pushes it to ghcr.io/dmiller-pf9. Nothing is built
 # from this repository: the workflow checks out the fawkes ref and runs its
 # own Makefile targets, so the artifact is exactly what that ref contains.
 #
-# Pushes: ghcr.io/dmiller-pf9/pcd-release:<releases/ce/VERSION> and every chart
-# as ghcr.io/dmiller-pf9/charts/<name>:<version>. The packages must be public
-# (see README); publish fails if one is not.
+# Pushes: ghcr.io/dmiller-pf9/pcd-release:<releases/<flavour>/VERSION>. Since
+# fawkes milestone 018 the charts travel inside the artifact, so nothing is
+# pushed under ghcr.io/dmiller-pf9/charts any more. The package must be public
+# (see README); publish fails if it is not.
 name: release
 
 on:
@@ -15,13 +17,21 @@ on:
         description: The platform9/fawkes ref to build (branch, tag or SHA)
         required: true
         default: main
+      flavour:
+        description: The artifact line to build (releases/<flavour>/)
+        required: true
+        default: pcd
+        type: choice
+        options:
+          - pcd
+          - saas-oci
 
 permissions:
   contents: read
   packages: write
 
 env:
-  CE_REGISTRY: oci://ghcr.io/dmiller-pf9
+  PCD_REGISTRY: oci://ghcr.io/dmiller-pf9
 
 jobs:
   release:
@@ -51,9 +61,9 @@ jobs:
         with:
           version: 1.2.3
 
-      - name: Fetch the inputs, assemble and test
+      - name: Fetch the inputs, assemble and test (${{ inputs.flavour }})
         working-directory: fawkes
-        run: make test-ce
+        run: make test-${{ inputs.flavour }}
 
       - name: Log in to ghcr.io
         env:
@@ -65,19 +75,20 @@ jobs:
 
       - name: Publish
         working-directory: fawkes
-        run: make ce-publish
+        run: make ${{ inputs.flavour }}-publish
 
       - name: Summary
         working-directory: fawkes
         run: |
-          version=$(tr -d '\n' < releases/ce/VERSION)
+          flavour='${{ inputs.flavour }}'
+          version=$(tr -d '\n' < "releases/$flavour/VERSION")
           digest=$(oras resolve "ghcr.io/dmiller-pf9/pcd-release:$version")
           {
-            echo "## PCD Community Edition from platform9/fawkes@${{ inputs.ref }}"
+            echo "## The $flavour line from platform9/fawkes@${{ inputs.ref }}"
             echo
             echo "- artifact: \`ghcr.io/dmiller-pf9/pcd-release:$version\` (\`$digest\`)"
-            echo "- charts, under \`ghcr.io/dmiller-pf9/charts\`:"
-            for tgz in releases/ce/out/charts/*.tgz; do
-              echo "  - \`$(basename "$tgz" .tgz)\`"
+            echo "- charts inside it:"
+            find "releases/$flavour/out/release" -name '*.tgz' | sort | while read -r tgz; do
+              echo "  - \`${tgz#releases/$flavour/out/release/}\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"
