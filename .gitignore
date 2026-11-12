@@ -1,0 +1,3 @@
+# Local copies of official PCD release bundles; never committed (they are
+# fetched by URL and digest by the fawkes build).
+pcd-charts/
