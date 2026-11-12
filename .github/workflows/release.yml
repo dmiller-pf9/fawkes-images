@@ -25,6 +25,7 @@ on:
         options:
           - pcd
           - saas-oci
+          - pcd-2026.12
 
 permissions:
   contents: read
