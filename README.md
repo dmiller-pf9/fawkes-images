@@ -1,5 +1,16 @@
 # fawkes-images
 
+> **Retired on 2026-11-13.** The images, release artifacts and the operator's
+> chart are now published publicly at `quay.io/platform9`
+> (`fawkes`, `fawkes-job`, `fawkes-releases`, `fawkes-charts`):
+> - the images and artifacts by
+>   [`platform9/fawkes-releases`](https://github.com/platform9/fawkes-releases);
+> - the chart by `chart.yml` of
+>   [`platform9/fawkes`](https://github.com/platform9/fawkes).
+>
+> Every tag published here was copied there at the same digest. Nothing
+> published here is deleted, and nothing new is published here.
+
 Workflows that build and publish the images and artifacts of
 [`platform9/fawkes`](https://github.com/platform9/fawkes), the PCD installer
 and upgrade operator, to `ghcr.io/dmiller-pf9` for testing. This repository
